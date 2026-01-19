@@ -203,7 +203,7 @@ class XueqiuCrawler:
             return None
 
         logger.info(f"成功获取 {etf_code} 价格: {price}")
-        return (price, ETF_CONFIG['name'])
+        return (price, ETF_CONFIG[etf_code]['name'])
 
     def fetch_price_sync(self, etf_code: str) -> Optional[Tuple[float, str]]:
         """
@@ -230,7 +230,7 @@ class XueqiuCrawler:
 
                 if price is not None:
                     logger.info(f"成功获取 {etf_code} 价格: {price}")
-                    return (price, ETF_CONFIG['name'])
+                    return (price, ETF_CONFIG[etf_code]['name'])
 
                 return None
 

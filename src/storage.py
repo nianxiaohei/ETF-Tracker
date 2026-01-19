@@ -200,13 +200,13 @@ class ETFTransactionStorage(CSVStorage):
 
         # 更新或添加记录
         if existing_idx >= 0:
-            records[existing_idx]['transaction_price'] = round(price, 2)
+            records[existing_idx]['transaction_price'] = round(price, 3)
             records[existing_idx]['transaction_quantity'] = quantity
             records[existing_idx]['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         else:
             new_record = {
                 'etf_code': etf_code,
-                'transaction_price': round(price, 2),
+                'transaction_price': round(price, 3),
                 'transaction_quantity': quantity,
                 'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }

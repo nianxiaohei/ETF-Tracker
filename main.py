@@ -8,14 +8,12 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
-from rich.live import Live
-from typing import Dict, Optional, List
+from typing import Dict, List
 
 from src.logger import logger
 from src.crawler import XueqiuCrawler
 from src.storage import etf_transaction_storage
 from config.app import ETF_CONFIG
-from src.calculator import calculate_profit_loss_with_current
 # 初始化
 console = Console()
 
@@ -37,18 +35,15 @@ def print_menu():
     """打印主菜单"""
     menu = """
 ┌─────────────────────────────────────────────────────────────┐
-│  请选择功能：                                                │
+│  请选择功能：                                               │
 │                                                             │
-│  [bold cyan]1.[/bold cyan] ETF最新价                                      │
-│     每隔1秒抓取16只ETF的最新价格                            │
-│                                                             │
-│  [bold cyan]2.[/bold cyan] 更新上次交易价格和数量                            │
+│  [bold cyan]1.[/bold cyan] 更新上次交易价格和数量                            │
 │     更新任意ETF的上次交易价格和数量                         │
 │                                                             │
-│  [bold cyan]3.[/bold cyan] 交易信号                                      │
+│  [bold cyan]2.[/bold cyan] 交易信号                                          │
 │     分析所有ETF的价格涨跌幅并提示交易信号                   │
 │                                                             │
-│  [bold cyan]0.[/bold cyan] 退出程序                                      │
+│  [bold cyan]0.[/bold cyan] 退出程序                                          │
 └─────────────────────────────────────────────────────────────┘
 """
     console.print(menu)
@@ -56,69 +51,59 @@ def print_menu():
 
 def fetch_latest_prices():
     """
-    选项1：连续抓取16只ETF的最新价格
-    每隔1秒刷新一次
+    选项1：抓取16只ETF的最新价格（一次性）
     """
-    console.print("\n[bold yellow]开始实时监控ETF价格（按Ctrl+C停止）[/bold yellow]\n")
+    console.print("\n[bold yellow]正在抓取16只ETF最新价格...[/bold yellow]\n")
 
     crawler = XueqiuCrawler()
 
-    try:
-        with Live(console=console, refresh_per_second=1) as live:
-            while True:
-                # 创建表格
-                table = Table(box=box.ROUNDED, show_lines=False)
-                table.add_column("#", style="cyan", justify="right", width=3)
-                table.add_column("ETF代码", style="yellow", width=10)
-                table.add_column("ETF名称", style="blue", width=20)
-                table.add_column("最新价格", style="green", justify="right", width=10)
-                table.add_column("更新时间", style="dim", width=20)
+    # 创建表格
+    table = Table(box=box.ROUNDED, show_lines=False)
+    table.add_column("#", style="cyan", justify="right", width=3)
+    table.add_column("ETF代码", style="yellow", width=12)
+    table.add_column("ETF名称", style="blue", width=22)
+    table.add_column("最新价格", style="green", justify="right", width=12)
 
-                # 依次抓取16只ETF价格
-                for idx, (etf_code, etf_info) in enumerate(ETF_CONFIG.items(), 1):
-                    try:
-                        result = crawler.fetch_price_sync(etf_code)
-                        if result:
-                            price, name = result
-                            table.add_row(
-                                str(idx),
-                                etf_code,
-                                name,
-                                f"[bold]{price:.3f}[/bold] 元",
-                                time.strftime('%H:%M:%S')
-                            )
-                        else:
-                            table.add_row(
-                                str(idx),
-                                etf_code,
-                                etf_info['name'],
-                                "[red]获取失败[/red]",
-                                time.strftime('%H:%M:%S')
-                            )
-                    except Exception as e:
-                        table.add_row(
-                            str(idx),
-                            etf_code,
-                            etf_info['name'],
-                            "[red]错误[/red]",
-                            time.strftime('%H:%M:%S')
-                        )
-                        logger.error(f"获取{etf_code}价格失败: {e}")
+    # 依次抓取16只ETF价格
+    with console.status("正在抓取价格数据...", spinner="dots"):
+        for idx, (etf_code, etf_info) in enumerate(ETF_CONFIG.items(), 1):
+            try:
+                result = crawler.fetch_price_sync(etf_code)
+                if result:
+                    price, name = result
+                    table.add_row(
+                        str(idx),
+                        etf_code,
+                        name,
+                        f"[bold]{price:.3f}[/bold] 元"
+                    )
+                else:
+                    table.add_row(
+                        str(idx),
+                        etf_code,
+                        etf_info['name'],
+                        "[red]获取失败[/red]"
+                    )
+            except Exception as e:
+                table.add_row(
+                    str(idx),
+                    etf_code,
+                    etf_info['name'],
+                    "[red]错误[/red]"
+                )
+                logger.error(f"获取{etf_code}价格失败: {e}")
 
-                    # 短暂延迟，避免请求过快
-                    time.sleep(0.1)
+            # 短暂延迟，避免请求过快
+            time.sleep(0.1)
 
-                live.update(Panel(
-                    table,
-                    title=f"[bold]ETF价格实时监控[/bold] | 更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-                    box=box.ROUNDED
-                ))
+    # 显示结果
+    console.print(Panel(
+        table,
+        title=f"[bold]ETF最新价格[/bold] | 更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        box=box.ROUNDED
+    ))
 
-                # 等待1秒后刷新
-                time.sleep(1)
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]已停止实时监控[/yellow]\n")
+    console.print("\n[green]✓[/green] 价格抓取完成\n")
 
 
 def update_transaction_data():
@@ -235,9 +220,9 @@ def analyze_trading_signals():
     # 分析结果表格
     table = Table(box=box.ROUNDED)
     table.add_column("ETF代码", style="cyan")
-    table.add_column("ETF名称", style="blue")
+    table.add_column("ETF名称")  # 白色文字（默认样式）
     table.add_column("上次交易价", style="yellow")
-    table.add_column("最新价", style="green")
+    table.add_column("最新价")  # 动态颜色（绿色/红色）
     table.add_column("涨跌幅", style="magenta")
     table.add_column("接近目标", style="red")
 
@@ -273,10 +258,17 @@ def analyze_trading_signals():
         else:
             change_str = f"[red]↓ {abs(change_rate):.2f}%[/red]"
 
+        # 根据涨跌设置最新价颜色
+        if change_rate >= 0:
+            current_price_str = f"[green]{current_data['price']:.3f} 元[/green]"
+        else:
+            current_price_str = f"[red]{current_data['price']:.3f} 元[/red]"
+
         # 高亮超过±3%的ETF
         if abs(change_rate) >= 3:
             etf_code_str = f"[bold red]{etf_code}[/bold red]"
-            name_str = f"[bold]{etf_info['name']}[/bold]"
+            name_str = etf_info['name']
+            target_text = f"{closest_target:+.0f}% ({data['price'] * (1 + closest_target / 100):.3f})"
             alert_list.append({
                 'code': etf_code,
                 'name': etf_info['name'],
@@ -290,14 +282,13 @@ def analyze_trading_signals():
         else:
             etf_code_str = etf_code
             name_str = etf_info['name']
-
-        target_text = f"{closest_target:+.0f}% ({data['price'] * (1 + closest_target / 100):.3f})"
+            target_text = "--"  # 涨跌幅小于±3%的显示--
 
         table.add_row(
             etf_code_str,
             name_str,
             f"{data['price']:.3f} 元",
-            f"{current_data['price']:.3f} 元",
+            current_price_str,
             change_str,
             target_text
         )
@@ -349,13 +340,11 @@ def main():
     while True:
         print_menu()
 
-        choice = input("请输入选项编号（0-3）: ").strip()
+        choice = input("请输入选项编号（0-2）: ").strip()
 
         if choice == '1':
-            fetch_latest_prices()
-        elif choice == '2':
             update_transaction_data()
-        elif choice == '3':
+        elif choice == '2':
             analyze_trading_signals()
         elif choice == '0':
             console.print("\n[yellow]感谢使用，再见！[/yellow]\n")
