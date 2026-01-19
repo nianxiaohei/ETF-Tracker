@@ -1,26 +1,22 @@
 """
 ETF 价格跟踪系统 - 主程序
+交互式菜单版本，支持16只ETF同时监控
 """
-import typer
+import time
+import sys
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
-from typing import Optional
+from rich.live import Live
+from typing import Dict, Optional, List
 
 from src.logger import logger
 from src.crawler import XueqiuCrawler
-from src.storage import price_storage, transaction_storage
-from src.calculator import calculate_profit_loss_with_current, check_date_range
-from src.alert import check_alert_status
+from src.storage import etf_transaction_storage
 from config.app import ETF_CONFIG
-
+from src.calculator import calculate_profit_loss_with_current
 # 初始化
-app = typer.Typer(
-    help="ETF 价格跟踪与交易提醒系统",
-    rich_markup_mode="rich",
-    rich_help_panel=True
-)
 console = Console()
 
 
@@ -30,351 +26,345 @@ def print_banner():
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
 ║        ETF 价格跟踪与交易提醒系统                            ║
+║              支持16只ETF同时监控                             ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """
     console.print(f"[bold cyan]{banner}[/bold cyan]")
 
 
-def print_etf_info():
-    """打印ETF信息"""
-    etf_code = ETF_CONFIG['code']
-    etf_name = ETF_CONFIG['name']
-    console.print(Panel(
-        f"[bold]ETF 代码:[/bold] {etf_code}\n"
-        f"[bold]ETF 名称:[/bold] {etf_name}",
-        title="[bold]当前跟踪的 ETF[/bold]",
-        box=box.ROUNDED
-    ))
+def print_menu():
+    """打印主菜单"""
+    menu = """
+┌─────────────────────────────────────────────────────────────┐
+│  请选择功能：                                                │
+│                                                             │
+│  [bold cyan]1.[/bold cyan] ETF最新价                                      │
+│     每隔1秒抓取16只ETF的最新价格                            │
+│                                                             │
+│  [bold cyan]2.[/bold cyan] 更新上次交易价格和数量                            │
+│     更新任意ETF的上次交易价格和数量                         │
+│                                                             │
+│  [bold cyan]3.[/bold cyan] 交易信号                                      │
+│     分析所有ETF的价格涨跌幅并提示交易信号                   │
+│                                                             │
+│  [bold cyan]0.[/bold cyan] 退出程序                                      │
+└─────────────────────────────────────────────────────────────┘
+"""
+    console.print(menu)
 
 
-@app.command("analyze")
-def analyze_etf(
-    code: str = typer.Option(
-        ETF_CONFIG['code'], "--code", "-c",
-        help="ETF 代码（如 SZ159915）"
-    ),
-    price: Optional[float] = typer.Option(
-        None, "--price", "-p",
-        help="上次交易价格（如果不提供，会提示输入）"
-    ),
-    quantity: Optional[int] = typer.Option(
-        None, "--quantity", "-q",
-        help="交易数量（份）（如果不提供，会提示输入）"
-    )
-):
+def fetch_latest_prices():
     """
-    分析 ETF 价格和盈亏情况
+    选项1：连续抓取16只ETF的最新价格
+    每隔1秒刷新一次
     """
-    print_banner()
-    print_etf_info()
+    console.print("\n[bold yellow]开始实时监控ETF价格（按Ctrl+C停止）[/bold yellow]\n")
 
-    console.print("\n[bold yellow]📊 开始分析 ETF 价格...[/bold yellow]\n")
+    crawler = XueqiuCrawler()
 
-    # 步骤 1: 获取当前价格
-    console.print("[bold]步骤 1: 获取当前价格[/bold]")
-    with console.status("正在从雪球网站获取价格...", spinner="dots"):
-        crawler = XueqiuCrawler()
-        result = crawler.fetch_price_sync(code)
+    try:
+        with Live(console=console, refresh_per_second=1) as live:
+            while True:
+                # 创建表格
+                table = Table(box=box.ROUNDED, show_lines=False)
+                table.add_column("#", style="cyan", justify="right", width=3)
+                table.add_column("ETF代码", style="yellow", width=10)
+                table.add_column("ETF名称", style="blue", width=20)
+                table.add_column("最新价格", style="green", justify="right", width=10)
+                table.add_column("更新时间", style="dim", width=20)
 
-    if not result:
-        console.print("[red]✗ 获取价格失败，请检查网络和 ETF 代码[/red]")
-        raise typer.Exit(1)
+                # 依次抓取16只ETF价格
+                for idx, (etf_code, etf_info) in enumerate(ETF_CONFIG.items(), 1):
+                    try:
+                        result = crawler.fetch_price_sync(etf_code)
+                        if result:
+                            price, name = result
+                            table.add_row(
+                                str(idx),
+                                etf_code,
+                                name,
+                                f"[bold]{price:.3f}[/bold] 元",
+                                time.strftime('%H:%M:%S')
+                            )
+                        else:
+                            table.add_row(
+                                str(idx),
+                                etf_code,
+                                etf_info['name'],
+                                "[red]获取失败[/red]",
+                                time.strftime('%H:%M:%S')
+                            )
+                    except Exception as e:
+                        table.add_row(
+                            str(idx),
+                            etf_code,
+                            etf_info['name'],
+                            "[red]错误[/red]",
+                            time.strftime('%H:%M:%S')
+                        )
+                        logger.error(f"获取{etf_code}价格失败: {e}")
 
-    current_price, etf_name = result
+                    # 短暂延迟，避免请求过快
+                    time.sleep(0.1)
 
-    console.print(f"[green]✓[/green] 成功获取价格: [bold]{current_price} 元[/bold]")
-    console.print(f"当前时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                live.update(Panel(
+                    table,
+                    title=f"[bold]ETF价格实时监控[/bold] | 更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                    box=box.ROUNDED
+                ))
 
-    # 步骤 2: 输入上次交易信息
-    console.print("[bold]步骤 2: 输入交易信息[/bold]")
+                # 等待1秒后刷新
+                time.sleep(1)
 
-    # 获取上次交易价格
-    if price is None:
-        price = typer.prompt("请输入上次交易价格（元）", type=float)
-    console.print(f"上次交易价格: [bold]{price} 元[/bold]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]已停止实时监控[/yellow]\n")
 
-    # 获取交易数量
-    if quantity is None:
-        quantity = typer.prompt("请输入交易数量（份）", type=int)
-    console.print(f"交易数量: [bold]{quantity:,} 份[/bold]")
 
-    # 计算上次交易金额
-    last_amount = price * quantity
-    console.print(f"上次交易金额: [bold]{last_amount:,.2f} 元[/bold]\n")
+def update_transaction_data():
+    """
+    选项2：更新上次交易价格和数量
+    显示所有ETF，询问哪只需要更新
+    """
+    console.print("\n[bold yellow]更新ETF上次交易数据[/bold yellow]\n")
 
-    # 步骤 3: 判断区间并生成提醒
-    console.print("[bold]步骤 3: 区间判断与提醒[/bold]")
+    # 显示所有ETF列表
+    table = Table(box=box.ROUNDED)
+    table.add_column("编号", style="cyan")
+    table.add_column("ETF代码", style="yellow")
+    table.add_column("ETF名称", style="blue")
+    table.add_column("上次交易价", style="green")
+    table.add_column("交易数量", style="magenta")
 
-    # 进行交易（添加到记录）
-    transaction_id = transaction_storage.add_transaction(code, price, quantity)
+    current_data = etf_transaction_storage.get_all_etf_transactions()
 
-    # 检查是否需要提醒
-    alert_result = check_alert_status(current_price, price, transaction_id)
+    for idx, (etf_code, etf_info) in enumerate(ETF_CONFIG.items(), 1):
+        if etf_code in current_data:
+            data = current_data[etf_code]
+            table.add_row(
+                str(idx),
+                etf_code,
+                etf_info['name'],
+                f"{data['price']:.3f} 元",
+                f"{data['quantity']:,} 份"
+            )
+        else:
+            table.add_row(
+                str(idx),
+                etf_code,
+                etf_info['name'],
+                "[dim]未设置[/dim]",
+                "[dim]未设置[/dim]"
+            )
 
-    # 显示当前价格与上次交易的对比
-    change_rate = alert_result['current_change']
-    change_arrow = "↑" if change_rate >= 0 else "↓"
-    change_color = "green" if change_rate >= 0 else "red"
+    console.print(table)
 
-    console.print(f"\n当前价格相比上次交易: [{change_color}]{change_arrow} {abs(change_rate)}%[/{change_color}]")
+    # 询问哪只ETF需要更新
+    choice = input("\n请选择要更新的ETF编号（1-16），或按回车返回菜单: ").strip()
 
-    # 显示区间判断结果
-    if alert_result['in_range']:
-        console.print(Panel(
-            f"当前价格 [bold]{current_price} 元[/bold] 落在 [bold red]{alert_result['matched_range']}[/bold red] 区间内！",
-            title="⚠️  提醒",
-            style="yellow"
-        ))
+    if not choice:
+        console.print("[yellow]返回主菜单[/yellow]\n")
+        return
 
-        # 显示距离关键价位的涨跌幅
-        levels = alert_result['levels']
-        if alert_result['matched_range'] == '[+3% ~ +5%]':
-            to_plus5 = ((levels['+5%'] - current_price) / price) * 100
-            to_plus3 = ((current_price - levels['+3%']) / price) * 100
-            console.print(f"距离 +5% 目标 ({levels['+5%']} 元): {to_plus5:.2f}%")
-            console.print(f"距离 +3% 目标 ({levels['+3%']} 元): {to_plus3:.2f}%")
-        elif alert_result['matched_range'] == '[-5% ~ -3%]':
-            to_minus5 = ((current_price - levels['-5%']) / price) * 100
-            to_minus3 = ((levels['-3%'] - current_price) / price) * 100
-            console.print(f"距离 -5% 目标 ({levels['-5%']} 元): {to_minus5:.2f}%")
-            console.print(f"距离 -3% 目标 ({levels['-3%']} 元): {to_minus3:.2f}%")
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(ETF_CONFIG):
+            etf_code = list(ETF_CONFIG.keys())[idx]
+            etf_name = ETF_CONFIG[etf_code]['name']
 
-        # 显示是否需要提醒
-        if alert_result['should_alert']:
-            console.print(f"\n[bold yellow]📢 建议操作提醒: {alert_result['alert_reason']}[/bold yellow]")
+            console.print(f"\n[bold]正在更新: {etf_code} - {etf_name}[/bold]\n")
 
-    else:
-        console.print("当前价格未进入关键区间，建议观望")
+            # 输入价格
+            price = float(input("请输入上次交易价格（元）: ").strip())
 
-    # 步骤 4: 盈亏分析
-    console.print("\n[bold]步骤 4: 盈亏分析[/bold]\n")
+            # 输入数量
+            quantity = int(input("请输入交易数量（份）: ").strip())
 
-    # 使用表格展示结果
-    table = Table(box=box.ROUNDED, show_lines=True)
-    table.add_column("涨跌幅", style="bold cyan", justify="center")
-    table.add_column("对应价(元)", style="yellow", justify="right")
-    table.add_column("交易金额(元)", style="green", justify="right")
-    table.add_column("盈亏(元)", style="magenta", justify="right")
-    table.add_column("盈亏率", style="blue", justify="right")
+            # 保存数据
+            etf_transaction_storage.save_etf_transaction(etf_code, price, quantity)
 
-    # 计算各价位盈亏
-    profit_results = calculate_profit_loss_with_current(current_price, price, quantity)
+            console.print(f"\n[green]✓[/green] 已更新 {etf_name} 的数据:")
+            console.print(f"  上次交易价格: {price:.3f} 元")
+            console.print(f"  交易数量: {quantity:,} 份\n")
 
-    # 显示表头
-    console.print(f"上次交易: {price} 元 × {quantity:,} 份 = {profit_results['last_transaction']['amount']:,.2f} 元\n")
+        else:
+            console.print("[red]编号超出范围[/red]\n")
+    except ValueError:
+        console.print("[red]请输入有效的数字[/red]\n")
 
-    # 添加当前价行（高亮）
-    current_data = profit_results['current']
-    table.add_row(
-        "当前价",
-        f"[bold]{current_data['price']}[/bold]",
-        f"[bold]{current_data['amount']:,.2f}[/bold]",
-        f"[bold]{'+' if current_data['profit_amount'] >= 0 else ''}{current_data['profit_amount']:,.2f}[/bold]",
-        f"[bold]{'+' if current_data['profit_percentage'] >= 0 else ''}{current_data['profit_percentage']}%[/bold]",
-        style="on grey23"
-    )
 
-    # 添加各涨跌幅行
-    for label in ['+10%', '+5%', '+3%', '-3%', '-5%', '-10%']:
-        data = profit_results[label]
+def analyze_trading_signals():
+    """
+    选项3：交易信号分析
+    分析每只ETF的价格涨跌幅，与±3%、±5%、±10%比较
+    重点提示超过±3%的ETF
+    """
+    console.print("\n[bold yellow]分析交易信号[/bold yellow]\n")
+
+    # 获取所有ETF的交易数据
+    transaction_data = etf_transaction_storage.get_all_etf_transactions()
+
+    if not transaction_data:
+        console.print("[red]暂无ETF交易数据，请先更新交易数据[/red]\n")
+        return
+
+    # 抓取所有ETF的当前价格
+    crawler = XueqiuCrawler()
+    current_prices = {}
+
+    console.print("[cyan]正在抓取ETF最新价格...[/cyan]")
+    progress = console.status("抓取中...")
+    progress.start()
+
+    for etf_code, etf_info in ETF_CONFIG.items():
+        try:
+            result = crawler.fetch_price_sync(etf_code)
+            if result:
+                price, name = result
+                current_prices[etf_code] = {
+                    'price': price,
+                    'name': name
+                }
+        except Exception as e:
+            logger.error(f"获取{etf_code}价格失败: {e}")
+
+        time.sleep(0.1)  # 避免请求过快
+
+    progress.stop()
+
+    # 分析结果表格
+    table = Table(box=box.ROUNDED)
+    table.add_column("ETF代码", style="cyan")
+    table.add_column("ETF名称", style="blue")
+    table.add_column("上次交易价", style="yellow")
+    table.add_column("最新价", style="green")
+    table.add_column("涨跌幅", style="magenta")
+    table.add_column("接近目标", style="red")
+
+    # 重点提示的ETF
+    alert_list = []
+
+    # 检查每组ETF
+    for etf_code, data in transaction_data.items():
+        if etf_code not in current_prices:
+            continue
+
+        etf_info = ETF_CONFIG[etf_code]
+        current_data = current_prices[etf_code]
+
+        # 计算涨跌幅
+        change_rate = ((current_data['price'] - data['price']) / data['price']) * 100
+
+        # 检查接近哪些目标价位
+        targets = [-10, -5, -3, 3, 5, 10]
+        closest_target = None
+        distance = 999
+
+        for target in targets:
+            target_price = data['price'] * (1 + target / 100)
+            current_distance = abs(current_data['price'] - target_price)
+            if current_distance < distance:
+                distance = current_distance
+                closest_target = target
+
+        # 格式化涨跌幅
+        if change_rate >= 0:
+            change_str = f"[green]↑ {change_rate:.2f}%[/green]"
+        else:
+            change_str = f"[red]↓ {abs(change_rate):.2f}%[/red]"
+
+        # 高亮超过±3%的ETF
+        if abs(change_rate) >= 3:
+            etf_code_str = f"[bold red]{etf_code}[/bold red]"
+            name_str = f"[bold]{etf_info['name']}[/bold]"
+            alert_list.append({
+                'code': etf_code,
+                'name': etf_info['name'],
+                'last_price': data['price'],
+                'current_price': current_data['price'],
+                'change_rate': change_rate,
+                'quantity': data['quantity'],
+                'last_amount': data['price'] * data['quantity'],
+                'current_amount': current_data['price'] * data['quantity']
+            })
+        else:
+            etf_code_str = etf_code
+            name_str = etf_info['name']
+
+        target_text = f"{closest_target:+.0f}% ({data['price'] * (1 + closest_target / 100):.3f})"
+
         table.add_row(
-            label,
-            str(data['price']),
-            f"{data['amount']:,.2f}",
-            f"{'+' if data['profit_amount'] >= 0 else ''}{data['profit_amount']:,.2f}",
-            f"{'+' if data['profit_percentage'] >= 0 else ''}{data['profit_percentage']}%"
+            etf_code_str,
+            name_str,
+            f"{data['price']:.3f} 元",
+            f"{current_data['price']:.3f} 元",
+            change_str,
+            target_text
         )
 
     console.print(table)
 
-    # 操作建议
-    console.print("\n[bold]操作建议:[/bold]")
-    if current_price > price:
-        profit = current_data['profit_amount']
-        profit_rate = current_data['profit_percentage']
-        console.print(f"  [green]✓[/green] 目前已盈利 {profit:,.2f} 元 ({profit_rate}%)")
+    # 显示重点提示
+    if alert_list:
+        console.print("\n" + "=" * 80)
+        console.print("[bold red]⏰ 重点交易信号（涨跌幅超过±3%）[/bold red]")
+        console.print("=" * 80 + "\n")
 
-        if 3 <= profit_rate <= 5:
-            console.print("  [yellow]⚠️[/yellow] 盈利在 3%-5% 区间，[bold]可考虑部分止盈[/bold]")
-        elif profit_rate >= 5:
-            console.print("  [yellow]⚠️[/yellow] 盈利超过 5%，[bold]建议考虑止盈[/bold]")
-        else:
-            console.print("  [blue]ℹ️[/blue] 盈利未达目标区间，[bold]建议继续持有[/bold]")
+        for alert in alert_list:
+            change_color = "green" if alert['change_rate'] >= 0 else "red"
+            change_symbol = "↑" if alert['change_rate'] >= 0 else "↓"
+
+            console.print(Panel(
+                f"[bold]{alert['name']} ({alert['code']})[/bold]\n\n"
+                f"上次交易: {alert['last_price']:.3f} 元 × {alert['quantity']:,} 份 = {alert['last_amount']:,.2f} 元\n"
+                f"最新价格: {alert['current_price']:.3f} 元 × {alert['quantity']:,} 份 = {alert['current_amount']:,.2f} 元\n\n"
+                f"总盈亏: {'+' if alert['change_rate'] >= 0 else ''}{alert['current_amount'] - alert['last_amount']:,.2f} 元\n"
+                f"涨跌幅: [{change_color}]{change_symbol} {abs(alert['change_rate']):.2f}%[/{change_color}]",
+                title=f"{change_symbol} {abs(alert['change_rate']):.2f}%",
+                style=change_color,
+                box=box.ROUNDED
+            ))
+
+            # 操作建议
+            if alert['change_rate'] >= 3:
+                console.print(f"[bold yellow]📈 操作建议: 涨幅较大，可考虑止盈[/bold yellow]\n")
+            elif alert['change_rate'] <= -3:
+                console.print(f"[bold yellow]📉 操作建议: 跌幅较大，建议密切关注[/bold yellow]\n")
+
     else:
-        loss = abs(current_data['profit_amount'])
-        loss_rate = abs(current_data['profit_percentage'])
-        console.print(f"  [red]✗[/red] 目前已亏损 {loss:,.2f} 元 ({loss_rate}%)")
+        console.print("\n[blue]ℹ️  暂无任何ETF涨跌幅超过±3%[/blue]\n")
 
-        if loss_rate >= 5:
-            console.print("  [red]⚠️[/red] 亏损超过 5%，[bold]建议考虑止损[/bold]")
-        elif 3 <= loss_rate <= 5:
-            console.print("  [yellow]⚠️[/yellow] 亏损在 3%-5% 区间，[bold]密切关注[/bold]")
-        else:
-            console.print("  [blue]ℹ️[/blue] 亏损较小，[bold]建议继续持有观望[/bold]")
-
-    # 添加页脚
-    console.print("\n" + "─" * 60)
+    console.print("\n" + "─" * 80)
     console.print("[dim]备注：本工具仅供参考，不构成投资建议。投资有风险，入市需谨慎。[/dim]")
-    console.print("─" * 60)
+    console.print("─" * 80 + "\n")
 
 
-@app.command("price")
-def get_current_price(
-    code: str = typer.Option(
-        ETF_CONFIG['code'], "--code", "-c",
-        help="ETF 代码"
-    )
-):
-    """
-    获取 ETF 当前价格
-    """
-    print_banner()
-
-    console.print("\n[bold]获取当前 ETF 价格[/bold]\n")
-
-    with console.status("正在连接雪球网站...", spinner="dots"):
-        crawler = XueqiuCrawler()
-        result = crawler.fetch_price_sync(code)
-
-    if result:
-        price, name = result
-        console.print(Panel(
-            f"ETF 代码: [bold cyan]{code}[/bold cyan]\n"
-            f"ETF 名称: [bold]{name}[/bold]\n"
-            f"当前价格: [bold green]{price} 元[/bold green]\n"
-            f"获取时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            title="✓ 价格获取成功",
-            box=box.ROUNDED
-        ))
-    else:
-        console.print("[red]✗ 获取价格失败[/red]")
-        raise typer.Exit(1)
-
-
-@app.command("history")
-def show_price_history(
-    code: str = typer.Option(
-        ETF_CONFIG['code'], "--code", "-c",
-        help="ETF 代码"
-    ),
-    days: int = typer.Option(
-        7, "--days", "-d",
-        help="显示最近几天"
-    )
-):
-    """
-    显示价格历史记录
-    """
-    print_banner()
-
-    console.print(f"\n[bold]价格历史记录（最近 {days} 天）[/bold]\n")
-
-    records = price_storage.get_history(days)
-
-    if not records:
-        console.print("暂无历史记录")
-        return
-
-    table = Table(box=box.ROUNDED)
-    table.add_column("时间", style="cyan")
-    table.add_column("ETF", style="yellow")
-    table.add_column("价格(元)", style="green", justify="right")
-
-    for record in records:
-        table.add_row(
-            record['record_time'],
-            record['etf_code'],
-            record['price']
-        )
-
-    console.print(table)
-    console.print(f"\n总计 {len(records)} 条记录")
-
-
-@app.command("fetch")
-def fetch_and_save_price(
-    code: str = typer.Option(
-        ETF_CONFIG['code'], "--code", "-c",
-        help="ETF 代码"
-    )
-):
-    """
-    获取价格并保存到历史记录
-    """
-    print_banner()
-
-    console.print("\n[bold]获取价格并保存[/bold]\n")
-
-    with console.status("正在获取价格...", spinner="dots"):
-        crawler = XueqiuCrawler()
-        result = crawler.fetch_price_sync(code)
-
-    if not result:
-        console.print("[red]✗ 获取价格失败[/red]")
-        raise typer.Exit(1)
-
-    price, name = result
-
-    # 保存到历史记录
-    price_record = price_storage.add_price_record(code, name, price)
-
-    console.print(Panel(
-        f"获取成功并保存:\n"
-        f"ETF: {code} - {name}\n"
-        f"价格: {price} 元\n"
-        f"记录时间: {price_record['record_time']}",
-        title="✓ 保存成功",
-        box=box.ROUNDED,
-        style="green"
-    ))
-
-
-@app.command("list")
-def list_transactions():
-    """
-    列出所有交易记录
-    """
-    print_banner()
-
-    console.print("\n[bold]交易记录列表[/bold]\n")
-
-    records = transaction_storage.read_all()
-
-    if not records:
-        console.print("暂无交易记录")
-        return
-
-    table = Table(box=box.ROUNDED)
-    table.add_column("ID", style="cyan", justify="right")
-    table.add_column("日期", style="yellow")
-    table.add_column("ETF", style="blue")
-    table.add_column("价格", style="green", justify="right")
-    table.add_column("数量", style="magenta", justify="right")
-    table.add_column("类型", style="red")
-
-    for record in records:
-        table.add_row(
-            record['id'],
-            record['transaction_date'],
-            record['etf_code'],
-            f"{float(record['transaction_price']):.2f} 元",
-            f"{int(record['transaction_quantity']):,}",
-            record['transaction_type']
-        )
-
-    console.print(table)
-
-
-@app.callback()
 def main():
     """
-    ETF 价格跟踪与交易提醒系统
-
-    功能: 自动跟踪 ETF 价格，分析盈亏，提供交易提醒
+    主程序入口
+    交互式菜单系统
     """
-    pass
+    print_banner()
+
+    while True:
+        print_menu()
+
+        choice = input("请输入选项编号（0-3）: ").strip()
+
+        if choice == '1':
+            fetch_latest_prices()
+        elif choice == '2':
+            update_transaction_data()
+        elif choice == '3':
+            analyze_trading_signals()
+        elif choice == '0':
+            console.print("\n[yellow]感谢使用，再见！[/yellow]\n")
+            sys.exit(0)
+        else:
+            console.print("[red]无效选项，请重新输入[/red]\n")
+
+        input("\n按回车键继续...")
 
 
 if __name__ == '__main__':
-    app()
+    main()

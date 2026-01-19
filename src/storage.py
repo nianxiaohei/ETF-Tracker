@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from src.logger import logger
-from config.app import CSV_FILES
+from config.app import CSV_FILES, ETF_CONFIG
 
 
 class CSVStorage:
@@ -174,8 +174,97 @@ class PriceHistoryStorage(CSVStorage):
         return all_records[:days * 24]  # 假设每小时一条数据
 
 
+class ETFTransactionStorage(CSVStorage):
+    """ETF上次交易数据存储（为每只ETF保存独立的上次交易价格和数量）"""
+
+    def __init__(self):
+        super().__init__(CSV_FILES['user_transactions'])
+
+    def save_etf_transaction(self, etf_code: str, price: float, quantity: int):
+        """
+        保存或更新ETF的上次交易数据
+
+        参数:
+            etf_code: ETF代码
+            price: 上次交易价格
+            quantity: 交易数量
+        """
+        records = self.read_all()
+
+        # 查找是否已存在该ETF的记录
+        existing_idx = -1
+        for idx, record in enumerate(records):
+            if record['etf_code'] == etf_code:
+                existing_idx = idx
+                break
+
+        # 更新或添加记录
+        if existing_idx >= 0:
+            records[existing_idx]['transaction_price'] = round(price, 2)
+            records[existing_idx]['transaction_quantity'] = quantity
+            records[existing_idx]['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            new_record = {
+                'etf_code': etf_code,
+                'transaction_price': round(price, 2),
+                'transaction_quantity': quantity,
+                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            records.append(new_record)
+
+        # 重新写入文件
+        fieldnames = ['etf_code', 'transaction_price', 'transaction_quantity', 'updated_at']
+        with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(records)
+
+        logger.info(f"更新ETF交易数据: {etf_code} - {price}元 × {quantity}份")
+
+    def get_etf_transaction(self, etf_code: str) -> Optional[Dict[str, Any]]:
+        """
+        获取某只ETF的上次交易数据
+
+        参数:
+            etf_code: ETF代码
+
+        返回:
+            交易数据或None
+        """
+        records = self.read_all()
+        for record in records:
+            if record['etf_code'] == etf_code:
+                return {
+                    'code': record['etf_code'],
+                    'price': float(record['transaction_price']),
+                    'quantity': int(record['transaction_quantity'])
+                }
+        return None
+
+    def get_all_etf_transactions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        获取所有ETF的上次交易数据
+
+        返回:
+            {etf_code: {code, price, quantity}}
+        """
+        records = self.read_all()
+        result = {}
+        for record in records:
+            result[record['etf_code']] = {
+                'code': record['etf_code'],
+                'price': float(record['transaction_price']),
+                'quantity': int(record['transaction_quantity'])
+            }
+        return result
+
+    def has_etf_data(self, etf_code: str) -> bool:
+        """检查某只ETF是否有交易数据"""
+        return self.get_etf_transaction(etf_code) is not None
+
+
 class UserTransactionStorage(CSVStorage):
-    """用户交易记录存储"""
+    """用户交易记录存储（示例代码，新版本中可以移除或保留兼容性）"""
 
     def __init__(self):
         super().__init__(CSV_FILES['user_transactions'])
@@ -195,29 +284,10 @@ class UserTransactionStorage(CSVStorage):
         返回:
             交易记录 ID
         """
-        transaction_id = self.count() + 1
-
-        record = {
-            'id': transaction_id,
-            'etf_code': etf_code,
-            'transaction_price': round(price, 2),
-            'transaction_quantity': quantity,
-            'transaction_type': transaction_type,
-            'transaction_date': datetime.now().strftime('%Y-%m-%d'),
-            'is_alert_enabled': 'true',
-            'notes': notes,
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-
-        fieldnames = [
-            'id', 'etf_code', 'transaction_price', 'transaction_quantity',
-            'transaction_type', 'transaction_date', 'is_alert_enabled', 'notes', 'created_at'
-        ]
-
-        self.append(record, fieldnames)
-        logger.info(f"添加交易记录: {transaction_id} - {transaction_type} {price}元 × {quantity}份")
-
-        return transaction_id
+        # 新版本中，这里直接调用ETFTransactionStorage
+        from .storage import etf_transaction_storage
+        etf_transaction_storage.save_etf_transaction(etf_code, price, quantity)
+        return 1
 
     def get_latest_transaction(self) -> Optional[Dict[str, Any]]:
         """获取最近一笔交易记录"""
@@ -320,19 +390,17 @@ class AlertHistoryStorage(CSVStorage):
 
 
 # 初始化全局存储实例
-from config.app import ETF_CONFIG
-ETF_CODE = ETF_CONFIG['code']
-ETF_NAME = ETF_CONFIG['name']
-
 price_storage = PriceHistoryStorage()
 transaction_storage = UserTransactionStorage()
 alert_status_storage = AlertStatusStorage()
 alert_history_storage = AlertHistoryStorage()
+etf_transaction_storage = ETFTransactionStorage()
 
 __all__ = [
     'price_storage',
     'transaction_storage',
     'alert_status_storage',
     'alert_history_storage',
+    'etf_transaction_storage',
     'CSVStorage'
 ]

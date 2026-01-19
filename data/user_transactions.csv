@@ -1,3 +1,0 @@
-id,etf_code,transaction_price,transaction_quantity,transaction_type,transaction_date,is_alert_enabled,notes,created_at
-1,SZ159915,3.05,1000,buy,2026-01-16,true,,2026-01-16 18:04:55
-2,SZ159915,3.12,10000,buy,2026-01-16,true,,2026-01-16 18:11:58
