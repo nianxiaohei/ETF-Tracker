@@ -331,9 +331,7 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 如有问题或建议：
 
 1. 提交 [GitHub Issue](issues)
-2. 发送邮件到：author@example.com
-3. 加入讨论群：[链接]
-
+2. 加我的VX：Xiaohei713
 ---
 
 <div align="center">
