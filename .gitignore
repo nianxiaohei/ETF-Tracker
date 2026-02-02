@@ -20,9 +20,9 @@ ENV/
 logs/
 *.log
 
-# Data files (optional - you may want to track these)
-# data/
-# *.csv
+# Data files - user private data, not tracked
+ data/
+ *.csv
 
 # macOS
 .DS_Store

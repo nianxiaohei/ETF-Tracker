@@ -357,6 +357,117 @@ class AlertStatusStorage(CSVStorage):
         self.append(record, fieldnames)
 
 
+class ETFListStorage(CSVStorage):
+    """ETF观察列表存储（支持动态添加/删除ETF）"""
+
+    def __init__(self):
+        super().__init__(CSV_FILES['etf_list'])
+
+    def init_default_etfs(self):
+        """初始化默认的16只ETF（仅在首次运行时）"""
+        if self.exists():
+            return
+
+        from config.app import ETF_CONFIG
+
+        for etf_code, etf_info in ETF_CONFIG.items():
+            self.add_etf(
+                etf_code=etf_code,
+                etf_name=etf_info['name'],
+                url=etf_info['url']
+            )
+
+        logger.info("初始化默认ETF列表完成")
+
+    def add_etf(self, etf_code: str, etf_name: str, url: str) -> bool:
+        """
+        添加新的ETF到观察列表
+
+        参数:
+            etf_code: ETF代码
+            etf_name: ETF名称
+            url: 雪球链接
+
+        返回:
+            是否添加成功
+        """
+        # 检查是否已存在
+        if self.etf_exists(etf_code):
+            logger.warning(f"ETF {etf_code} 已存在，无法重复添加")
+            return False
+
+        record = {
+            'etf_code': etf_code,
+            'etf_name': etf_name,
+            'url': url,
+            'added_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+        fieldnames = ['etf_code', 'etf_name', 'url', 'added_at']
+        self.append(record, fieldnames)
+
+        logger.info(f"添加ETF到观察列表: {etf_code} - {etf_name}")
+        return True
+
+    def remove_etf(self, etf_code: str) -> bool:
+        """
+        从观察列表删除ETF
+
+        参数:
+            etf_code: ETF代码
+
+        返回:
+            是否删除成功
+        """
+        records = self.read_all()
+
+        # 查找并删除
+        filtered_records = [r for r in records if r['etf_code'] != etf_code]
+
+        if len(filtered_records) == len(records):
+            logger.warning(f"ETF {etf_code} 不存在，无法删除")
+            return False
+
+        # 重新写入文件
+        fieldnames = ['etf_code', 'etf_name', 'url', 'added_at']
+        with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(filtered_records)
+
+        logger.info(f"从观察列表删除ETF: {etf_code}")
+        return True
+
+    def get_all_etfs(self) -> Dict[str, Dict[str, str]]:
+        """
+        获取所有ETF列表
+
+        返回:
+            {etf_code: {'code': ..., 'name': ..., 'url': ...}}
+        """
+        records = self.read_all()
+        result = {}
+        for record in records:
+            result[record['etf_code']] = {
+                'code': record['etf_code'],
+                'name': record['etf_name'],
+                'url': record['url']
+            }
+        return result
+
+    def etf_exists(self, etf_code: str) -> bool:
+        """检查ETF是否已存在"""
+        records = self.read_all()
+        for record in records:
+            if record['etf_code'] == etf_code:
+                return True
+        return False
+
+    def get_etf_count(self) -> int:
+        """获取ETF数量"""
+        return self.count()
+
+
 class AlertHistoryStorage(CSVStorage):
     """提醒历史记录存储"""
 
@@ -395,6 +506,7 @@ transaction_storage = UserTransactionStorage()
 alert_status_storage = AlertStatusStorage()
 alert_history_storage = AlertHistoryStorage()
 etf_transaction_storage = ETFTransactionStorage()
+etf_list_storage = ETFListStorage()
 
 __all__ = [
     'price_storage',
@@ -402,5 +514,6 @@ __all__ = [
     'alert_status_storage',
     'alert_history_storage',
     'etf_transaction_storage',
+    'etf_list_storage',
     'CSVStorage'
 ]

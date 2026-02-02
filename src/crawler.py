@@ -27,6 +27,8 @@ class XueqiuCrawler:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
         }
+        # 缓存ETF信息
+        self.etf_info_cache = {}
 
     async def fetch_page(self, etf_code: str) -> Optional[str]:
         """
@@ -216,6 +218,28 @@ class XueqiuCrawler:
             (价格, ETF 名称) 元组，失败返回 None
         """
         try:
+            # 检查缓存中是否有该ETF的信息
+            if etf_code in self.etf_info_cache:
+                etf_name = self.etf_info_cache[etf_code]
+            else:
+                # 从默认配置或ETF列表存储中获取ETF名称
+                if etf_code in ETF_CONFIG:
+                    etf_name = ETF_CONFIG[etf_code]['name']
+                else:
+                    # 从CSV文件中获取（兼容新添加的ETF）
+                    try:
+                        from src.storage import etf_list_storage
+                        all_etfs = etf_list_storage.get_all_etfs()
+                        if etf_code in all_etfs:
+                            etf_name = all_etfs[etf_code]['name']
+                        else:
+                            etf_name = etf_code  #  fallback：使用代码作为名称
+                    except:
+                        etf_name = etf_code  # 获取失败时，使用代码作为名称
+
+                # 缓存ETF信息
+                self.etf_info_cache[etf_code] = etf_name
+
             # 简单的延迟
             time.sleep(self.delay)
 
@@ -230,7 +254,7 @@ class XueqiuCrawler:
 
                 if price is not None:
                     logger.info(f"成功获取 {etf_code} 价格: {price}")
-                    return (price, ETF_CONFIG[etf_code]['name'])
+                    return (price, etf_name)
 
                 return None
 

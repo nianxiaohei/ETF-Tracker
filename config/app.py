@@ -108,7 +108,8 @@ CSV_FILES = {
     'price_history': os.path.join(data_dir, os.getenv('PRICE_HISTORY_FILE', 'price_history.csv')),
     'user_transactions': os.path.join(data_dir, os.getenv('USER_TRANSACTIONS_FILE', 'user_transactions.csv')),
     'alert_status': os.path.join(data_dir, os.getenv('ALERT_STATUS_FILE', 'alert_status.csv')),
-    'alert_history': os.path.join(data_dir, os.getenv('ALERT_HISTORY_FILE', 'alert_history.csv'))
+    'alert_history': os.path.join(data_dir, os.getenv('ALERT_HISTORY_FILE', 'alert_history.csv')),
+    'etf_list': os.path.join(data_dir, os.getenv('ETF_LIST_FILE', 'etf_list.csv'))
 }
 
 # HTTP 配置
