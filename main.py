@@ -31,6 +31,164 @@ def print_banner():
     console.print(f"[bold cyan]{banner}[/bold cyan]")
 
 
+def process_group_trading_analysis(etf_list, transaction_data, current_prices):
+    """
+    处理单个组的ETF交易分析
+
+    参数:
+        etf_list: 该组的ETF列表
+        transaction_data: 所有ETF的交易数据
+        current_prices: 当前价格数据
+
+    返回:
+        包含items和alerts的字典
+    """
+    items = []
+    alerts = []
+
+    for etf_code, etf_info in etf_list.items():
+        if etf_code not in current_prices:
+            continue
+
+        current_data = current_prices[etf_code]
+
+        # 检查是否有交易数据
+        if etf_code in transaction_data:
+            # 有交易数据，计算涨跌幅
+            data = transaction_data[etf_code]
+            change_rate = ((current_data['price'] - data['price']) / data['price']) * 100
+
+            # 检查接近哪些目标价位
+            targets = [-10, -5, -3, 3, 5, 10]
+            closest_target = None
+            distance = 999
+
+            for target in targets:
+                target_price = data['price'] * (1 + target / 100)
+                current_distance = abs(current_data['price'] - target_price)
+                if current_distance < distance:
+                    distance = current_distance
+                    closest_target = target
+
+            # 添加到显示列表
+            items.append({
+                'etf_code': etf_code,
+                'etf_info': etf_info,
+                'has_transaction': True,
+                'data': data,
+                'current_data': current_data,
+                'change_rate': change_rate,
+                'closest_target': closest_target
+            })
+
+            # 如果涨跌幅超过±3%，添加到提醒列表
+            if abs(change_rate) >= 3:
+                alerts.append({
+                    'code': etf_code,
+                    'name': etf_info['name'],
+                    'last_price': data['price'],
+                    'current_price': current_data['price'],
+                    'change_rate': change_rate,
+                    'quantity': data['quantity'],
+                    'last_amount': data['price'] * data['quantity'],
+                    'current_amount': current_data['price'] * data['quantity']
+                })
+
+        else:
+            # 没有交易数据
+            items.append({
+                'etf_code': etf_code,
+                'etf_info': etf_info,
+                'has_transaction': False,
+                'current_data': current_data
+            })
+
+    # 按涨跌幅排序（升序）
+    items.sort(key=lambda x: x.get('change_rate', float('inf')))
+
+    return {'items': items, 'alerts': alerts}
+
+
+def render_trading_table(items, alerts, group_name: str):
+    """
+    渲染交易信号表格
+
+    参数:
+        items: ETF数据列表
+        alerts: 提醒列表（仅用于判断是否高亮，不用于展示）
+        group_name: 组别名称（"A股"或"美股"）
+    """
+    table = Table(box=box.ROUNDED)
+    table.add_column(f"{group_name}ETF", style="cyan")
+    table.add_column("ETF名称")
+    table.add_column("上次交易价", style="yellow")
+    table.add_column("最新价")
+    table.add_column("涨跌幅", style="magenta")
+    table.add_column("接近目标", style="red")
+
+    for item in items:
+        etf_code = item['etf_code']
+        etf_info = item['etf_info']
+
+        if item['has_transaction']:
+            # 有交易数据
+            data = item['data']
+            current_data = item['current_data']
+            change_rate = item['change_rate']
+            closest_target = item['closest_target']
+
+            # 格式化涨跌幅
+            if change_rate >= 0:
+                change_str = f"[green]↑ {change_rate:.2f}%[/green]"
+            else:
+                change_str = f"[red]↓ {abs(change_rate):.2f}%[/red]"
+
+            # 根据涨跌设置最新价颜色（只显示数字）
+            if change_rate >= 0:
+                current_price_str = f"[green]{current_data['price']:.3f}[/green]"
+            else:
+                current_price_str = f"[red]{current_data['price']:.3f}[/red]"
+
+            # 高亮超过±3%的ETF
+            if abs(change_rate) >= 3:
+                etf_code_str = f"[bold red]{etf_code}[/bold red]"
+                name_str = etf_info['name']
+                target_text = f"{closest_target:+.0f}% ({data['price'] * (1 + closest_target / 100):.3f})"
+            else:
+                etf_code_str = etf_code
+                name_str = etf_info['name']
+                target_text = "--"
+
+            table.add_row(
+                etf_code_str,
+                name_str,
+                f"{data['price']:.3f}",
+                current_price_str,
+                change_str,
+                target_text
+            )
+
+        else:
+            # 没有交易数据
+            etf_code_str = etf_code
+            name_str = etf_info['name']
+            last_price_str = "[dim]--[/dim]"
+            current_price_str = f"{item['current_data']['price']:.3f}"
+            change_str = "[dim]--[/dim]"
+            target_text = "[dim]--[/dim]"
+
+            table.add_row(
+                etf_code_str,
+                name_str,
+                last_price_str,
+                current_price_str,
+                change_str,
+                target_text
+            )
+
+    console.print(table)
+
+
 def print_menu():
     """打印主菜单"""
     menu = """
@@ -112,18 +270,49 @@ def fetch_latest_prices():
 def update_transaction_data():
     """
     选项1：更新上次交易价格和数量
-    显示所有ETF，询问哪只需要更新（包括没有交易数据的ETF，显示为"--"）
+    增加组别选择步骤
     """
     console.print("\n[bold yellow]更新ETF上次交易数据[/bold yellow]\n")
 
-    # 获取动态的ETF列表
-    etf_list = etf_list_storage.get_all_etfs()
+    # --- 新增：选择市场组别 ---
+    group_menu = """
+┌─────────────────────────────────────────────────────────────┐
+│  请选择市场组别：                                           │
+│                                                             │
+│  [bold cyan]1.[/bold cyan] A股ETF                                          │
+│     更新A股基金的资料                                      │
+│                                                             │
+│  [bold cyan]2.[/bold cyan] 美股ETF                                         │
+│     更新美股基金的资料                                     │
+│                                                             │
+│  [bold cyan]0.[/bold cyan] 返回上级菜单                                     │
+└─────────────────────────────────────────────────────────────┘
+"""
+    console.print(group_menu)
+    group_choice = input("请输入选项编号：").strip()
 
-    # 显示所有ETF列表
+    if group_choice == '1':
+        group = "A股"
+    elif group_choice == '2':
+        group = "美股"
+    elif group_choice == '0':
+        return
+    else:
+        console.print("[red]无效选项[/red]\n")
+        return
+
+    # 获取该组的ETF列表
+    etf_list = etf_list_storage.get_all_etfs(group=group)
+    if not etf_list:
+        console.print(f"[yellow]{group}ETF列表为空[/yellow]\n")
+        return
+
+    # --- 原有逻辑：显示该组ETF并更新 ---
+    console.print(f"\n[bold]{group}ETF列表[/bold]\n")
     table = Table(box=box.ROUNDED)
     table.add_column("编号", style="cyan")
     table.add_column("ETF代码", style="yellow")
-    table.add_column("ETF名称", style="blue")
+    table.add_column("ETF名称", style="white")
     table.add_column("上次交易价", style="green")
     table.add_column("交易数量", style="magenta")
 
@@ -136,8 +325,8 @@ def update_transaction_data():
                 str(idx),
                 etf_code,
                 etf_info['name'],
-                f"{data['price']:.3f} 元",
-                f"{data['quantity']:,} 份"
+                f"{data['price']:.3f}",
+                f"{data['quantity']:,}"
             )
         else:
             table.add_row(
@@ -188,188 +377,74 @@ def update_transaction_data():
 def analyze_trading_signals():
     """
     选项2：交易信号分析
-    分析每只ETF的价格涨跌幅，与±3%、±5%、±10%比较
-    重点提示超过±3%的ETF
-    支持显示没有交易数据的ETF（显示为"--"）
+    先连续展示两个表格，再统一展示交易信号
     """
     console.print("\n[bold yellow]分析交易信号[/bold yellow]\n")
 
-    # 获取动态的ETF列表
-    etf_list = etf_list_storage.get_all_etfs()
+    # --- 获取两个组的数据 ---
+    a_share_etfs = etf_list_storage.get_all_etfs(group="A股")
+    us_stock_etfs = etf_list_storage.get_all_etfs(group="美股")
 
-    # 获取所有ETF的交易数据
     transaction_data = etf_transaction_storage.get_all_etf_transactions()
-
-    # 抓取所有ETF的当前价格
     crawler = XueqiuCrawler()
+
+    # 抓取所有ETF价格（一次抓取，分组展示）
     current_prices = {}
+    all_etf_codes = list(a_share_etfs.keys()) + list(us_stock_etfs.keys())
 
-    console.print("[cyan]正在抓取ETF最新价格...[/cyan]")
-    progress = console.status("抓取中...")
-    progress.start()
+    if all_etf_codes:
+        console.print("[cyan]正在抓取ETF最新价格...[/cyan]")
+        progress = console.status("抓取中...")
+        progress.start()
 
-    for etf_code, etf_info in etf_list.items():
-        try:
-            result = crawler.fetch_price_sync(etf_code)
-            if result:
-                price, name = result
-                current_prices[etf_code] = {
-                    'price': price,
-                    'name': name
-                }
-        except Exception as e:
-            logger.error(f"获取{etf_code}价格失败: {e}")
+        for etf_code in all_etf_codes:
+            try:
+                result = crawler.fetch_price_sync(etf_code)
+                if result:
+                    price, name = result
+                    current_prices[etf_code] = {
+                        'price': price,
+                        'name': name
+                    }
+            except Exception as e:
+                logger.error(f"获取{etf_code}价格失败: {e}")
 
-        time.sleep(0.1)  # 避免请求过快
+            time.sleep(0.1)  # 避免请求过快
 
-    progress.stop()
+        progress.stop()
 
-    # 分析结果表格
-    table = Table(box=box.ROUNDED)
-    table.add_column("ETF代码", style="cyan")
-    table.add_column("ETF名称")  # 白色文字（默认样式）
-    table.add_column("上次交易价", style="yellow")
-    table.add_column("最新价")  # 动态颜色（绿色/红色）
-    table.add_column("涨跌幅", style="magenta")
-    table.add_column("接近目标", style="red")
+    # 收集所有交易信号
+    all_alerts = {'A股': [], '美股': []}
 
-    # 重点提示的ETF
-    alert_list = []
+    # --- 处理并展示A股表格 ---
+    if a_share_etfs:
+        a_share_results = process_group_trading_analysis(
+            a_share_etfs,
+            transaction_data,
+            current_prices
+        )
+        if a_share_results:
+            render_trading_table(a_share_results['items'], a_share_results['alerts'], "A股")
+            all_alerts['A股'] = a_share_results['alerts']
 
-    # 收集所有需要显示的ETF数据，并计算涨跌幅
-    etf_display_list = []
+    # --- 处理并展示美股表格 ---
+    if us_stock_etfs:
+        us_stock_results = process_group_trading_analysis(
+            us_stock_etfs,
+            transaction_data,
+            current_prices
+        )
+        if us_stock_results:
+            render_trading_table(us_stock_results['items'], us_stock_results['alerts'], "美股")
+            all_alerts['美股'] = us_stock_results['alerts']
 
-    for etf_code, etf_info in etf_list.items():
-        if etf_code not in current_prices:
-            continue
-
-        current_data = current_prices[etf_code]
-
-        # 检查是否有交易数据
-        if etf_code in transaction_data:
-            # 有交易数据，计算涨跌幅
-            data = transaction_data[etf_code]
-            change_rate = ((current_data['price'] - data['price']) / data['price']) * 100
-
-            # 检查接近哪些目标价位
-            targets = [-10, -5, -3, 3, 5, 10]
-            closest_target = None
-            distance = 999
-
-            for target in targets:
-                target_price = data['price'] * (1 + target / 100)
-                current_distance = abs(current_data['price'] - target_price)
-                if current_distance < distance:
-                    distance = current_distance
-                    closest_target = target
-
-            # 添加到显示列表
-            etf_display_list.append({
-                'etf_code': etf_code,
-                'etf_info': etf_info,
-                'has_transaction': True,
-                'data': data,
-                'current_data': current_data,
-                'change_rate': change_rate,
-                'closest_target': closest_target
-            })
-
-            # 如果涨跌幅超过±3%，添加到提醒列表
-            if abs(change_rate) >= 3:
-                alert_list.append({
-                    'code': etf_code,
-                    'name': etf_info['name'],
-                    'last_price': data['price'],
-                    'current_price': current_data['price'],
-                    'change_rate': change_rate,
-                    'quantity': data['quantity'],
-                    'last_amount': data['price'] * data['quantity'],
-                    'current_amount': current_data['price'] * data['quantity']
-                })
-
-        else:
-            # 没有交易数据
-            etf_display_list.append({
-                'etf_code': etf_code,
-                'etf_info': etf_info,
-                'has_transaction': False,
-                'current_data': current_data
-            })
-
-    # 按照涨跌幅排序（优先有交易数据的，按change_rate升序排列）
-    # 有交易数据的排在前面，没有交易数据的排在后面
-    etf_display_list.sort(key=lambda x: x.get('change_rate', float('inf')))
-
-    # 按排序后的顺序添加到表格
-    for item in etf_display_list:
-        etf_code = item['etf_code']
-        etf_info = item['etf_info']
-
-        if item['has_transaction']:
-            # 有交易数据
-            data = item['data']
-            current_data = item['current_data']
-            change_rate = item['change_rate']
-            closest_target = item['closest_target']
-
-            # 格式化涨跌幅
-            if change_rate >= 0:
-                change_str = f"[green]↑ {change_rate:.2f}%[/green]"
-            else:
-                change_str = f"[red]↓ {abs(change_rate):.2f}%[/red]"
-
-            # 根据涨跌设置最新价颜色
-            if change_rate >= 0:
-                current_price_str = f"[green]{current_data['price']:.3f} 元[/green]"
-            else:
-                current_price_str = f"[red]{current_data['price']:.3f} 元[/red]"
-
-            # 高亮超过±3%的ETF
-            if abs(change_rate) >= 3:
-                etf_code_str = f"[bold red]{etf_code}[/bold red]"
-                name_str = etf_info['name']
-                target_text = f"{closest_target:+.0f}% ({data['price'] * (1 + closest_target / 100):.3f})"
-            else:
-                etf_code_str = etf_code
-                name_str = etf_info['name']
-                target_text = "--"  # 涨跌幅小于±3%的显示--
-
-            table.add_row(
-                etf_code_str,
-                name_str,
-                f"{data['price']:.3f} 元",
-                current_price_str,
-                change_str,
-                target_text
-            )
-
-        else:
-            # 没有交易数据
-            etf_code_str = etf_code
-            name_str = etf_info['name']
-            last_price_str = "[dim]--[/dim]"
-            current_price_str = f"{item['current_data']['price']:.3f} 元"  # 白色文字
-            change_str = "[dim]--[/dim]"
-            target_text = "[dim]--[/dim]"
-
-            table.add_row(
-                etf_code_str,
-                name_str,
-                last_price_str,
-                current_price_str,
-                change_str,
-                target_text
-            )
-
-    console.print(table)
-
-    # 显示重点提示
-    if alert_list:
+    # --- 统一展示交易信号（分成A股和美股两部分） ---
+    # A股信号
+    if all_alerts['A股']:
         console.print("\n" + "=" * 80)
-        console.print("[bold red]⏰ 重点交易信号（涨跌幅超过±3%）[/bold red]")
+        console.print("⏰ A股交易信号")
         console.print("=" * 80 + "\n")
-
-        for alert in alert_list:
+        for alert in all_alerts['A股']:
             change_color = "green" if alert['change_rate'] >= 0 else "red"
             change_symbol = "↑" if alert['change_rate'] >= 0 else "↓"
 
@@ -390,20 +465,48 @@ def analyze_trading_signals():
             elif alert['change_rate'] <= -3:
                 console.print(f"[bold yellow]📉 操作建议: 跌幅较大，建议密切关注[/bold yellow]\n")
 
-    else:
+    # 美股信号
+    if all_alerts['美股']:
+        console.print("\n" + "=" * 80)
+        console.print("⏰ 美股交易信号")
+        console.print("=" * 80 + "\n")
+        for alert in all_alerts['美股']:
+            change_color = "green" if alert['change_rate'] >= 0 else "red"
+            change_symbol = "↑" if alert['change_rate'] >= 0 else "↓"
+
+            console.print(Panel(
+                f"[bold]{alert['name']} ({alert['code']})[/bold]\n\n"
+                f"上次交易: {alert['last_price']:.3f} 元 × {alert['quantity']:,} 份 = {alert['last_amount']:,.2f} 元\n"
+                f"最新价格: {alert['current_price']:.3f} 元 × {alert['quantity']:,} 份 = {alert['current_amount']:,.2f} 元\n\n"
+                f"总盈亏: {'+' if alert['change_rate'] >= 0 else ''}{alert['current_amount'] - alert['last_amount']:,.2f} 元\n"
+                f"涨跌幅: [{change_color}]{change_symbol} {abs(alert['change_rate']):.2f}%[/{change_color}]",
+                title=f"{change_symbol} {abs(alert['change_rate']):.2f}%",
+                style=change_color,
+                box=box.ROUNDED
+            ))
+
+            # 操作建议
+            if alert['change_rate'] >= 3:
+                console.print(f"[bold yellow]📈 操作建议: 涨幅较大，可考虑止盈[/bold yellow]\n")
+            elif alert['change_rate'] <= -3:
+                console.print(f"[bold yellow]📉 操作建议: 跌幅较大，建议密切关注[/bold yellow]\n")
+
+    # 如果没有信号，显示提示
+    if not all_alerts['A股'] and not all_alerts['美股']:
         console.print("\n[blue]ℹ️  暂无任何ETF涨跌幅超过±3%[/blue]\n")
 
+    # 显示通用提示信息
     console.print("\n" + "─" * 80)
     console.print("[dim]备注：本工具仅供参考，不构成投资建议。投资有风险，入市需谨慎。[/dim]")
     console.print("─" * 80 + "\n")
 
 
-def add_etf_to_watchlist():
+def add_etf_to_watchlist(group: str = "A股"):
     """
     选项3-2：添加新的ETF到观察列表
     用户依次输入ETF代码、ETF名称、雪球链接
     """
-    console.print("\n[bold yellow]添加新的ETF到观察列表[/bold yellow]\n")
+    console.print(f"\n[bold yellow]添加{group}ETF到观察列表[/bold yellow]\n")
 
     # 输入ETF代码
     etf_code = input("请输入ETF代码（如：SZ159915）: ").strip().upper()
@@ -435,12 +538,13 @@ def add_etf_to_watchlist():
     console.print(f"\n[bold]请确认ETF信息：[/bold]")
     console.print(f"  ETF代码: {etf_code}")
     console.print(f"  ETF名称: {etf_name}")
+    console.print(f"  市场组别: {group}")
     console.print(f"  雪球链接: {url}\n")
 
     confirm = input("确认添加？（y/n）: ").strip().lower()
 
     if confirm == 'y':
-        success = etf_list_storage.add_etf(etf_code, etf_name, url)
+        success = etf_list_storage.add_etf(etf_code, etf_name, url, group=group)
         if success:
             console.print(f"\n[green]✓[/green] ETF {etf_code} 已成功添加到观察列表\n")
         else:
@@ -449,18 +553,18 @@ def add_etf_to_watchlist():
         console.print("[yellow]已取消添加[/yellow]\n")
 
 
-def remove_etf_from_watchlist():
+def remove_etf_from_watchlist(group: str = "A股"):
     """
     选项3-1：从观察列表删除ETF
     用户输入ETF编号，确认后删除
     """
-    console.print("\n[bold yellow]从观察列表删除ETF[/bold yellow]\n")
+    console.print(f"\n[bold yellow]从{group}观察列表删除ETF[/bold yellow]\n")
 
-    # 显示所有ETF列表
-    etf_list = etf_list_storage.get_all_etfs()
+    # 显示指定组的ETF列表
+    etf_list = etf_list_storage.get_all_etfs(group=group)
 
     if not etf_list:
-        console.print("[red]观察列表为空，无法删除[/red]\n")
+        console.print(f"[red]{group}ETF列表为空，无法删除[/red]\n")
         return
 
     table = Table(box=box.ROUNDED)
@@ -508,7 +612,7 @@ def remove_etf_from_watchlist():
 def update_etf_watchlist():
     """
     选项3：更新观察列表
-    提供两个子选项：删除ETF 或 添加ETF
+    增加组别选择步骤
     """
     console.print("\n[bold yellow]更新ETF观察列表[/bold yellow]\n")
 
@@ -516,30 +620,60 @@ def update_etf_watchlist():
     etf_count = etf_list_storage.get_etf_count()
     console.print(f"当前观察列表共有 [bold]{etf_count}[/bold] 只ETF\n")
 
-    # 显示子菜单
+    # --- 新增：选择市场组别 ---
+    group_menu = """
+┌─────────────────────────────────────────────────────────────┐
+│  请选择市场组别：                                           │
+│                                                             │
+│  [bold cyan]1.[/bold cyan] A股ETF                                          │
+│     查看/管理A股基金                                        │
+│                                                             │
+│  [bold cyan]2.[/bold cyan] 美股ETF                                         │
+│     查看/管理美股基金                                      │
+│                                                             │
+│  [bold cyan]0.[/bold cyan] 返回上级菜单                                     │
+└─────────────────────────────────────────────────────────────┘
+"""
+    console.print(group_menu)
+    group_choice = input("请输入选项编号：").strip()
+
+    if group_choice == '1':
+        group = "A股"
+    elif group_choice == '2':
+        group = "美股"
+    elif group_choice == '0':
+        return
+    else:
+        console.print("[red]无效选项[/red]\n")
+        return
+
+    # 显示该组的ETF数量
+    group_etfs = etf_list_storage.get_all_etfs(group=group)
+    console.print(f"{group}ETF数量: {len(group_etfs)}\n")
+
+    # --- 原有逻辑：显示操作菜单 ---
     sub_menu = """
 ┌─────────────────────────────────────────────────────────────┐
 │  请选择操作：                                               │
 │                                                             │
 │  [bold cyan]1.[/bold cyan] 删除列表中的ETF                                  │
-│     从观察列表中删除指定的ETF                               │
+│     从观察列表删除指定的ETF                               │
 │                                                             │
 │  [bold cyan]2.[/bold cyan] 添加ETF                                          │
 │     添加新的ETF到观察列表                                   │
 │                                                             │
-│  [bold cyan]0.[/bold cyan] 返回上级菜单                                      │
+│  [bold cyan]0.[/bold cyan] 返回上级菜单                                     │
 └─────────────────────────────────────────────────────────────┘
 """
     console.print(sub_menu)
-
-    choice = input("请输入选项编号（0-2）: ").strip()
+    choice = input("请输入选项编号（0-2）：").strip()
 
     if choice == '1':
-        remove_etf_from_watchlist()
+        remove_etf_from_watchlist(group=group)
     elif choice == '2':
-        add_etf_to_watchlist()
+        add_etf_to_watchlist(group=group)
     elif choice == '0':
-        console.print("[yellow]返回主菜单[/yellow]\n")
+        return
     else:
         console.print("[red]无效选项[/red]\n")
 

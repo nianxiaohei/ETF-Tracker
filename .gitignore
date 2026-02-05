@@ -1,13 +1,17 @@
+# Data files (contain user data)
+data/
+
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-venv/
 env/
-ENV/
-.venv
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # IDE
 .vscode/
@@ -16,36 +20,9 @@ ENV/
 *.swo
 *~
 
-# Logs
-logs/
-*.log
-
-# Data files - user private data, not tracked
- data/
- *.csv
-
-# macOS
+# OS
 .DS_Store
-*.plist
+Thumbs.db
 
-# Debug files
-debug_*.html
-
-# Environment variables
-.env
-.env.local
-
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-
-# pytest
-.pytest_cache/
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# Claude
+.claude/settings.local.json

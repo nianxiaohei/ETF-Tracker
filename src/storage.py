@@ -366,6 +366,8 @@ class ETFListStorage(CSVStorage):
     def init_default_etfs(self):
         """初始化默认的16只ETF（仅在首次运行时）"""
         if self.exists():
+            # 检查是否需要迁移
+            self.migrate_groups()
             return
 
         from config.app import ETF_CONFIG
@@ -374,12 +376,13 @@ class ETFListStorage(CSVStorage):
             self.add_etf(
                 etf_code=etf_code,
                 etf_name=etf_info['name'],
-                url=etf_info['url']
+                url=etf_info['url'],
+                group='A股'
             )
 
         logger.info("初始化默认ETF列表完成")
 
-    def add_etf(self, etf_code: str, etf_name: str, url: str) -> bool:
+    def add_etf(self, etf_code: str, etf_name: str, url: str, group: str = "A股") -> bool:
         """
         添加新的ETF到观察列表
 
@@ -387,6 +390,7 @@ class ETFListStorage(CSVStorage):
             etf_code: ETF代码
             etf_name: ETF名称
             url: 雪球链接
+            group: 市场组别（"A股"或"美股"），默认为"A股"
 
         返回:
             是否添加成功
@@ -400,13 +404,14 @@ class ETFListStorage(CSVStorage):
             'etf_code': etf_code,
             'etf_name': etf_name,
             'url': url,
+            'group': group,
             'added_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
-        fieldnames = ['etf_code', 'etf_name', 'url', 'added_at']
+        fieldnames = ['etf_code', 'etf_name', 'url', 'group', 'added_at']
         self.append(record, fieldnames)
 
-        logger.info(f"添加ETF到观察列表: {etf_code} - {etf_name}")
+        logger.info(f"添加ETF到观察列表: {etf_code} - {etf_name} ({group})")
         return True
 
     def remove_etf(self, etf_code: str) -> bool:
@@ -429,7 +434,7 @@ class ETFListStorage(CSVStorage):
             return False
 
         # 重新写入文件
-        fieldnames = ['etf_code', 'etf_name', 'url', 'added_at']
+        fieldnames = ['etf_code', 'etf_name', 'url', 'group', 'added_at']
         with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -438,21 +443,27 @@ class ETFListStorage(CSVStorage):
         logger.info(f"从观察列表删除ETF: {etf_code}")
         return True
 
-    def get_all_etfs(self) -> Dict[str, Dict[str, str]]:
+    def get_all_etfs(self, group: str = None) -> Dict[str, Dict[str, str]]:
         """
-        获取所有ETF列表
+        获取所有ETF列表，可选按组别筛选
+
+        参数:
+            group: 组别（"A股"或"美股"），None表示获取全部
 
         返回:
-            {etf_code: {'code': ..., 'name': ..., 'url': ...}}
+            {etf_code: {'code': ..., 'name': ..., 'url': ..., 'group': ...}}
         """
         records = self.read_all()
         result = {}
         for record in records:
-            result[record['etf_code']] = {
-                'code': record['etf_code'],
-                'name': record['etf_name'],
-                'url': record['url']
-            }
+            # 如果指定了group，只返回该组的ETF
+            if group is None or record.get('group') == group:
+                result[record['etf_code']] = {
+                    'code': record['etf_code'],
+                    'name': record['etf_name'],
+                    'url': record['url'],
+                    'group': record.get('group', 'A股')
+                }
         return result
 
     def etf_exists(self, etf_code: str) -> bool:
@@ -461,6 +472,35 @@ class ETFListStorage(CSVStorage):
         for record in records:
             if record['etf_code'] == etf_code:
                 return True
+        return False
+
+    def get_groups(self) -> List[str]:
+        """获取所有组别列表"""
+        records = self.read_all()
+        groups = set()
+        for record in records:
+            groups.add(record.get('group', 'A股'))
+        return sorted(list(groups))
+
+    def migrate_groups(self) -> bool:
+        """为缺少group字段的旧数据添加组别（全部标记为A股）"""
+        records = self.read_all()
+        need_update = False
+
+        for record in records:
+            if 'group' not in record:
+                record['group'] = 'A股'
+                need_update = True
+
+        if need_update:
+            # 重写CSV文件，添加group列
+            fieldnames = ['etf_code', 'etf_name', 'url', 'group', 'added_at']
+            with open(self.file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(records)
+            logger.info("完成旧数据迁移：为缺少group字段的ETF添加组别信息")
+            return True
         return False
 
     def get_etf_count(self) -> int:
