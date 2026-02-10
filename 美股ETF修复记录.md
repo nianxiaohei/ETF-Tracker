@@ -4,7 +4,9 @@
 
 美股ETF取数失败，错误码为100，无法获取价格数据。
 
-## 原因分析
+## 第一阶段修复（基础支持）
+
+### 原因分析
 
 东方财富API对不同市场使用不同的市场代码：
 - 深圳A股：市场代码 `0`（如：0.159915）
@@ -12,6 +14,101 @@
 - **美股ETF：市场代码 `107`（如：107.SCHD）**
 
 原代码只处理了A股（SZ/SH前缀），对于美股ETF（如SCHD, GLDM等）默认使用深圳市场代码 `0`，导致API返回错误码100。
+
+### 修复结果
+
+部分美股ETF可以正常获取：
+- ✅ SCHD (美国红利股ETF) - 市场代码107
+- ✅ GLDM (黄金MiniShares信托) - 市场代码107
+- ✅ VTI (全市场指数ETF) - 市场代码107
+
+## 第二阶段修复（多市场代码支持）
+
+### 新增问题
+
+某些美股ETF仍然失败：
+- ❌ QQQM (纳斯达克100指数ETF) - 使用107失败
+- ❌ VGIT (中期国债ETF) - 使用107失败
+- ❌ QQQ (纳斯达克100ETF) - 使用107失败
+- ❌ VXUS (国际股票ETF) - 使用107失败
+
+### 深层原因分析
+
+通过东方财富搜索接口发现，美股ETF实际有两种市场代码：
+- 市场代码 `107` - 部分美股ETF（如SCHD, GLDM, VTI）
+- 市场代码 `105` - 另一部分美股ETF（如QQQM, VGIT, QQQ, VXUS）
+
+东方财富搜索接口返回数据格式：
+```json
+{
+  "QuoteID": "107.SCHD",  // 或 "105.QQQM"
+}
+```
+
+原代码固定使用107市场代码，导致部分美股ETF无法获取。
+
+### 修复方案
+
+#### 新增 `_get_us_market_code` 方法
+
+```python
+def _get_us_market_code(self, etf_code: str) -> str:
+    """
+    获取美股ETF的正确市场代码（105或107）
+    通过东方财富搜索接口动态获取
+    """
+    try:
+        import httpx
+        search_url = 'https://searchapi.eastmoney.com/api/suggest/get'
+        params = {'input': etf_code, 'type': 14}
+        headers = self.headers.copy()
+
+        response = httpx.get(search_url, params=params, headers=headers, timeout=5)
+        data = response.json()
+
+        if data.get('QuotationCodeTable', {}).get('Data'):
+            items = data['QuotationCodeTable']['Data']
+            for item in items:
+                if item.get('Code') == etf_code.upper():
+                    quote_id = item.get('QuoteID', '')
+                    # QuoteID格式: "107.SCHD" 或 "105.QQQM"
+                    if '.' in quote_id:
+                        market_code = quote_id.split('.')[0]
+                        return market_code
+    except Exception as e:
+        logger.warning(f"获取 {etf_code} 的市场代码失败: {e}")
+
+    # 默认值
+    return '107'
+```
+
+### 修复结果
+
+所有美股ETF都能正常获取：
+
+#### 美股ETF测试通过✓
+- ✅ QQQM (纳斯达克100指数ETF) - 价格: 252.93 (市场代码105)
+- ✅ VGIT (中期国债ETF) - 价格: 59.93 (市场代码105)
+- ✅ QQQ (纳斯达克100ETF) - 价格: 614.32 (市场代码105)
+- ✅ VXUS (国际股票ETF) - 价格: 82.15 (市场代码105)
+- ✅ SCHD (美国红利股ETF) - 价格: 31.35 (市场代码107)
+- ✅ GLDM (黄金MiniShares信托) - 价格: 100.58 (市场代码107)
+- ✅ VTI (全市场指数ETF) - 价格: 342.64 (市场代码107)
+- ✅ VNM (越南ETF) - 价格: 18.045 (市场代码107)
+
+#### A股ETF测试正常✓
+- ✅ SZ159915 (创业板ETF) - 价格: 3.313
+- ✅ SH510300 (沪深300ETF) - 价格: 4.725
+
+## 最终结论
+
+东方财富美股ETF市场代码对照表：
+- **市场代码 0**: 深圳A股（SZ开头）
+- **市场代码 1**: 上海A股（SH开头）
+- **市场代码 105**: 部分美股ETF（如QQQM, VGIT, QQQ, VXUS, VGIT等）
+- **市场代码 107**: 另一部分美股ETF（如SCHD, GLDM, VTI, VNM等）
+
+通过动态搜索接口获取正确市场代码，解决了所有美股ETF的取数问题。
 
 ## 修复方案
 

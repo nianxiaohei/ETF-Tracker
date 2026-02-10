@@ -35,7 +35,7 @@ class EastMoneyCrawler:
             etf_code: ETF代码（如 SZ159915, SH510300, SCHD）
 
         返回:
-            东方财富市场代码（0=深圳，1=上海，107=美股）
+            东方财富市场代码（0=深圳，1=上海，105/107=美股）
         """
         if etf_code.startswith('SZ') or etf_code.startswith('sz'):
             return '0'  # 深圳市场
@@ -43,26 +43,43 @@ class EastMoneyCrawler:
             return '1'  # 上海市场
         else:
             # 美股ETF（代码不以SZ/SH开头）
-            # 从ETF列表中检查是否为美股
-            try:
-                from src.storage import etf_list_storage
-                all_etfs = etf_list_storage.get_all_etfs()
-                if etf_code in all_etfs:
-                    # 从ETF信息中获取市场组别
-                    etf_info = all_etfs[etf_code]
-                    group = etf_info.get('group', '')
-                    # 如果是美股，使用107市场代码
-                    if group == '美股':
-                        return '107'
-            except:
-                pass
+            # 使用搜索接口获取正确的美股市场代码
+            return self._get_us_market_code(etf_code)
 
-            # 如果不在列表中，检查是否为常见的美股ETF格式（纯字母）
-            import re
-            if re.match(r'^[A-Z]+$', etf_code.upper()):
-                return '107'  # 默认为美股
+    def _get_us_market_code(self, etf_code: str) -> str:
+        """
+        获取美股ETF的正确市场代码（105或107）
 
-            return '0'  # 默认为A股深圳市场
+        参数:
+            etf_code: ETF代码（如 QQQM, VGIT）
+
+        返回:
+            美股市场代码（105或107）
+        """
+        try:
+            import httpx
+            search_url = 'https://searchapi.eastmoney.com/api/suggest/get'
+            params = {'input': etf_code, 'type': 14}
+            headers = self.headers.copy()
+
+            response = httpx.get(search_url, params=params, headers=headers, timeout=5)
+            data = response.json()
+
+            if data.get('QuotationCodeTable', {}).get('Data'):
+                items = data['QuotationCodeTable']['Data']
+                for item in items:
+                    if item.get('Code') == etf_code.upper():
+                        quote_id = item.get('QuoteID', '')
+                        # QuoteID格式: "107.SCHD" 或 "105.QQQM"
+                        if '.' in quote_id:
+                            market_code = quote_id.split('.')[0]
+                            logger.debug(f"获取 {etf_code} 的市场代码: {market_code}")
+                            return market_code
+        except Exception as e:
+            logger.warning(f"获取 {etf_code} 的市场代码失败: {e}, 使用默认值107")
+
+        # 如果搜索失败或找不到，使用默认值107
+        return '107'
 
     def _get_etf_name(self, etf_code: str) -> str:
         """
