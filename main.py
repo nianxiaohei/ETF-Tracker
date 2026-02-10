@@ -11,7 +11,7 @@ from rich import box
 from typing import Dict, List
 
 from src.logger import logger
-from src.crawler import XueqiuCrawler
+from src.crawler_eastmoney import EastMoneyCrawler
 from src.storage import etf_transaction_storage, etf_list_storage
 from config.app import ETF_CONFIG
 # 初始化
@@ -23,8 +23,7 @@ def print_banner():
     banner = """
 ╔══════════════════════════════════════════════════════════════╗
 ║                                                              ║
-║        ETF 价格跟踪与交易提醒系统                            ║
-║              支持16只ETF同时监控                             ║
+║              ETF 价格跟踪与交易提醒系统                      ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 """
@@ -216,7 +215,7 @@ def fetch_latest_prices():
     """
     console.print("\n[bold yellow]正在抓取16只ETF最新价格...[/bold yellow]\n")
 
-    crawler = XueqiuCrawler()
+    crawler = EastMoneyCrawler()
 
     # 创建表格
     table = Table(box=box.ROUNDED, show_lines=False)
@@ -386,7 +385,7 @@ def analyze_trading_signals():
     us_stock_etfs = etf_list_storage.get_all_etfs(group="美股")
 
     transaction_data = etf_transaction_storage.get_all_etf_transactions()
-    crawler = XueqiuCrawler()
+    crawler = EastMoneyCrawler()
 
     # 抓取所有ETF价格（一次抓取，分组展示）
     current_prices = {}
@@ -527,9 +526,9 @@ def add_etf_to_watchlist(group: str = "A股"):
         console.print("[red]ETF名称不能为空[/red]\n")
         return
 
-    # 输入雪球链接（提供默认值）
-    default_url = f"https://xueqiu.com/S/{etf_code}"
-    url = input(f"请输入雪球个股页链接（直接回车使用默认值: {default_url}）: ").strip()
+    # 输入ETF链接（提供默认值）
+    default_url = f"https://quote.eastmoney.com/sz{etf_code[2:]}.html" if etf_code.startswith('SZ') else f"https://quote.eastmoney.com/sh{etf_code[2:]}.html"
+    url = input(f"请输入ETF链接（直接回车使用默认值: {default_url}）: ").strip()
 
     if not url:
         url = default_url
@@ -539,7 +538,7 @@ def add_etf_to_watchlist(group: str = "A股"):
     console.print(f"  ETF代码: {etf_code}")
     console.print(f"  ETF名称: {etf_name}")
     console.print(f"  市场组别: {group}")
-    console.print(f"  雪球链接: {url}\n")
+    console.print(f"  ETF链接: {url}\n")
 
     confirm = input("确认添加？（y/n）: ").strip().lower()
 
