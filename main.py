@@ -355,10 +355,10 @@ def update_transaction_data():
             console.print(f"\n[bold]正在更新: {etf_code} - {etf_name}[/bold]\n")
 
             # 输入价格
-            price = float(input("请输入上次交易价格（元）: ").strip())
+            price = float(input("请输入上次交易价格: ").strip())
 
             # 输入数量
-            quantity = int(input("请输入交易数量（份）: ").strip())
+            quantity = int(input("请输入交易数量: ").strip())
 
             # 保存数据
             etf_transaction_storage.save_etf_transaction(etf_code, price, quantity)
@@ -528,7 +528,7 @@ def add_etf_to_watchlist(group: str = "A股"):
 
     # 输入ETF链接（提供默认值）
     default_url = f"https://quote.eastmoney.com/sz{etf_code[2:]}.html" if etf_code.startswith('SZ') else f"https://quote.eastmoney.com/sh{etf_code[2:]}.html"
-    url = input(f"请输入ETF链接（直接回车使用默认值: {default_url}）: ").strip()
+    url = input(f"请输入ETF链接: ").strip()
 
     if not url:
         url = default_url
