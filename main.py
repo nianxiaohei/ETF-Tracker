@@ -11,7 +11,7 @@ from rich import box
 from typing import Dict, List
 
 from src.logger import logger
-from src.crawler_eastmoney import EastMoneyCrawler
+from src.data_source_manager import data_source_manager, fetch_etf_price
 from src.storage import etf_transaction_storage, etf_list_storage
 from config.app import ETF_CONFIG
 # 初始化
@@ -212,10 +212,8 @@ def print_menu():
 def fetch_latest_prices():
     """
     选项1：抓取16只ETF的最新价格（一次性）
-    """
+    # 使用统一数据源管理器（自动切换备用源）
     console.print("\n[bold yellow]正在抓取16只ETF最新价格...[/bold yellow]\n")
-
-    crawler = EastMoneyCrawler()
 
     # 创建表格
     table = Table(box=box.ROUNDED, show_lines=False)
@@ -228,7 +226,7 @@ def fetch_latest_prices():
     with console.status("正在抓取价格数据...", spinner="dots"):
         for idx, (etf_code, etf_info) in enumerate(ETF_CONFIG.items(), 1):
             try:
-                result = crawler.fetch_price_sync(etf_code)
+                result = fetch_etf_price(etf_code)
                 if result:
                     price, name = result
                     table.add_row(
@@ -385,7 +383,6 @@ def analyze_trading_signals():
     us_stock_etfs = etf_list_storage.get_all_etfs(group="美股")
 
     transaction_data = etf_transaction_storage.get_all_etf_transactions()
-    crawler = EastMoneyCrawler()
 
     # 抓取所有ETF价格（一次抓取，分组展示）
     current_prices = {}
@@ -398,7 +395,7 @@ def analyze_trading_signals():
 
         for etf_code in all_etf_codes:
             try:
-                result = crawler.fetch_price_sync(etf_code)
+                result = fetch_etf_price(etf_code)
                 if result:
                     price, name = result
                     current_prices[etf_code] = {

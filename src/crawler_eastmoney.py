@@ -247,34 +247,64 @@ class EastMoneyCrawler:
             'fields': 'f43,f57,f58,f107,f60,f116,f117,f73,f59,f46,f44,f45,f47,f48,f50,f51,f52,f55,f62,f164,f165,f166,f167,f168,f169,f170,f171,f172,f173,f257,f258'
         }
 
-        try:
-            with httpx.Client(timeout=self.timeout, headers=self.headers) as client:
-                url_with_params = f"{self.base_url}?secid={params['secid']}"
-                logger.info(f"正在请求东方财富API: {url_with_params}")
-                response = client.get(self.base_url, params=params)
-                response.raise_for_status()
+        # 重试机制
+        max_retries = 3
+        retry_delay = 1.0
 
-                data = response.json()
+        for attempt in range(max_retries):
+            try:
+                # 配置允许重定向的客户端
+                with httpx.Client(
+                    timeout=httpx.Timeout(self.timeout, connect=10.0),
+                    headers=self.headers,
+                    follow_redirects=True  # 允许自动重定向
+                ) as client:
+                    url_with_params = f"{self.base_url}?secid={params['secid']}"
+                    logger.info(f"正在请求东方财富API: {url_with_params} (尝试 {attempt + 1}/{max_retries})")
+                    response = client.get(self.base_url, params=params)
+                    response.raise_for_status()
 
-                # 解析价格数据
-                price = self._parse_price_from_api(data, etf_code)
-                if price is not None:
-                    etf_name = self._get_etf_name(etf_code)
-                    logger.info(f"成功从东方财富获取 {etf_code} 价格: {price}")
-                    return (price, etf_name)
+                    data = response.json()
+
+                    # 解析价格数据
+                    price = self._parse_price_from_api(data, etf_code)
+                    if price is not None:
+                        etf_name = self._get_etf_name(etf_code)
+                        logger.info(f"成功从东方财富获取 {etf_code} 价格: {price}")
+                        return (price, etf_name)
+                    else:
+                        logger.error(f"从东方财富API响应中解析价格失败")
+                        if attempt < max_retries - 1:
+                            logger.info(f"将在 {retry_delay}秒后重试...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                            continue
+                        return None
+
+            except httpx.HTTPStatusError as e:
+                logger.error(f"东方财富API HTTP错误: {e.response.status_code}")
+                if attempt < max_retries - 1:
+                    logger.info(f"将在 {retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
                 else:
-                    logger.error(f"从东方财富API响应中解析价格失败")
+                    return None
+            except Exception as e:
+                logger.error(f"东方财富API请求失败: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"将在 {retry_delay}秒后重试...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    # 尝试获取错误详情
+                    try:
+                        if 'response' in locals():
+                            logger.error(f"响应内容: {response.text[:200]}")
+                    except:
+                        pass
                     return None
 
-        except Exception as e:
-            logger.error(f"东方财富API请求失败: {e}")
-            # 尝试获取错误详情
-            try:
-                if 'response' in locals():
-                    logger.error(f"响应内容: {response.text[:200]}")
-            except:
-                pass
-            return None
+        return None
 
 
 def test_eastmoney_crawler():
