@@ -11,7 +11,7 @@ from rich import box
 from typing import Dict, List
 
 from src.logger import logger
-from src.data_source_manager import data_source_manager, fetch_etf_price
+from src.data_source_manager import fetch_etf_price
 from src.storage import etf_transaction_storage, etf_list_storage
 from config.app import ETF_CONFIG
 # 初始化
@@ -212,7 +212,7 @@ def print_menu():
 def fetch_latest_prices():
     """
     选项1：抓取16只ETF的最新价格（一次性）
-    # 使用统一数据源管理器（自动切换备用源）
+    """
     console.print("\n[bold yellow]正在抓取16只ETF最新价格...[/bold yellow]\n")
 
     # 创建表格
