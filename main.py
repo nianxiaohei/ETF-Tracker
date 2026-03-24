@@ -440,6 +440,8 @@ def analyze_trading_signals():
         console.print("\n" + "=" * 80)
         console.print("⏰ A股交易信号")
         console.print("=" * 80 + "\n")
+        # 按涨跌幅降序排序
+        all_alerts['A股'].sort(key=lambda x: x['change_rate'], reverse=True)
         for alert in all_alerts['A股']:
             change_color = "green" if alert['change_rate'] >= 0 else "red"
             change_symbol = "↑" if alert['change_rate'] >= 0 else "↓"
@@ -466,6 +468,8 @@ def analyze_trading_signals():
         console.print("\n" + "=" * 80)
         console.print("⏰ 美股交易信号")
         console.print("=" * 80 + "\n")
+        # 按涨跌幅降序排序
+        all_alerts['美股'].sort(key=lambda x: x['change_rate'], reverse=True)
         for alert in all_alerts['美股']:
             change_color = "green" if alert['change_rate'] >= 0 else "red"
             change_symbol = "↑" if alert['change_rate'] >= 0 else "↓"
